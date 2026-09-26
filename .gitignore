@@ -1,0 +1,9 @@
+docs/
+.superpowers/
+.erasewitness/
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+dist/
+.env

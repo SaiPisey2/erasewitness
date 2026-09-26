@@ -45,10 +45,14 @@ class Panel:
         except Exception as exc:  # any judge failure degrades to "unavailable"
             self._record(f"{judge.name}: {exc}")
             return [None] * len(texts)
-        if len(probs) != len(texts) or any(not 0.0 <= p <= 1.0 for p in probs):
+
+        def _valid(p: object) -> bool:
+            return isinstance(p, (int, float)) and not isinstance(p, bool) and 0.0 <= p <= 1.0
+
+        if len(probs) != len(texts) or not all(_valid(p) for p in probs):
             self._record(f"{judge.name}: malformed response")
             return [None] * len(texts)
-        return list(probs)
+        return [float(p) for p in probs]
 
     def _record(self, message: str) -> None:
         if message not in self.errors:

@@ -101,3 +101,17 @@ def test_panel_skips_judges_for_no_items(salary: Scenario) -> None:
     judge = _Counting()
     assert Panel([judge]).judge_items(salary, []) == []
     assert judge.calls == 0
+
+
+class _NonNumeric:
+    name = "nonnumeric"
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        return [None, 0.9]  # type: ignore[list-item]
+
+
+def test_panel_non_numeric_answer_degrades(salary: Scenario) -> None:
+    panel = Panel([_NonNumeric()])
+    out = panel.judge_items(salary, ITEMS)
+    assert out[1].verdict is Verdict.UNCERTAIN
+    assert panel.errors == ["nonnumeric: malformed response"]

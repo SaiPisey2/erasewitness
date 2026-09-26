@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, NoReturn
@@ -92,14 +93,18 @@ def run(
     )
     outcome = runner.run(loaded)
 
-    signing_key, created = load_or_create_key(key)
+    try:
+        signing_key, created = load_or_create_key(key)
+    except (OSError, ValueError) as exc:
+        _fail(f"cannot load signing key {key}: {exc}")
     if created:
         typer.echo(f"created signing key {key}", err=True)
     try:
         run_dir = write_run(outcome, out, signing_key, redact=redact_evidence)
     except SecretLeakError as exc:
         _fail(str(exc))
-    RunIndex(out.parent / "index.sqlite").add(outcome, run_dir)
+    except (OSError, ValueError) as exc:
+        _fail(f"cannot write report: {exc}")
 
     leaked = sum(p.verdict is Verdict.LEAKED for p in outcome.probes)
     typer.echo(
@@ -109,6 +114,10 @@ def run(
         typer.echo(f"run error: {outcome.error}", err=True)
     typer.echo(f"report: {run_dir / 'report.html'}")
     typer.echo(f"signer: {fingerprint(signing_key.public_key())}")
+    try:
+        RunIndex(out.parent / "index.sqlite").add(outcome, run_dir)
+    except (OSError, sqlite3.Error) as exc:
+        _fail(f"report written but run index update failed: {exc}")
     raise typer.Exit(EXIT_CODES[outcome.result])
 
 

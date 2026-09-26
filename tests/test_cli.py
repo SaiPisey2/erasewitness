@@ -113,3 +113,58 @@ def test_verify_unpinned_warns(tmp_path: Path) -> None:
 def test_run_prints_signer_fingerprint(tmp_path: Path) -> None:
     result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary")
     assert "signer: " in result.output
+
+
+def test_bad_key_file_exits_3(tmp_path: Path) -> None:
+    bad_key = tmp_path / "bad.key"
+    bad_key.write_text("not a key")
+    result = cli.invoke(
+        app,
+        [
+            "run",
+            "--target",
+            "reference-clean",
+            "--scenario",
+            "salary",
+            "--out",
+            str(tmp_path / "runs"),
+            "--key",
+            str(bad_key),
+        ],
+    )
+    combined = result.output + (result.stderr or "")
+    assert result.exit_code == 3, combined
+    assert "cannot load signing key" in combined
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+
+
+def test_unwritable_out_exits_3(tmp_path: Path) -> None:
+    out_path = tmp_path / "file"
+    out_path.write_text("not a directory")
+    result = cli.invoke(
+        app,
+        [
+            "run",
+            "--target",
+            "reference-clean",
+            "--scenario",
+            "salary",
+            "--out",
+            str(out_path),
+            "--key",
+            str(tmp_path / "k.key"),
+        ],
+    )
+    combined = result.output + (result.stderr or "")
+    assert result.exit_code == 3, combined
+    assert "cannot write report" in combined
+
+
+def test_index_failure_exits_3_after_report(tmp_path: Path) -> None:
+    (tmp_path / "index.sqlite").mkdir()
+    result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary")
+    combined = result.output + (result.stderr or "")
+    assert result.exit_code == 3, combined
+    assert "run index update failed" in combined
+    run_dir = _only_run_dir(tmp_path)
+    assert cli.invoke(app, ["verify", str(run_dir)]).exit_code == 0

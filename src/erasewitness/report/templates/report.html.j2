@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>erasewitness {{ r.run_id }}</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:2rem auto;max-width:1000px;color:#111;padding:0 1rem}
+.banner{padding:1rem 1.25rem;border-radius:6px;font-weight:600;font-size:1.2rem}
+.PASS{background:#dcfce7}.FAIL{background:#fee2e2}.INCONCLUSIVE,.ERROR{background:#fef3c7}
+table{border-collapse:collapse;width:100%;margin:1rem 0}
+td,th{border:1px solid #ddd;padding:.4rem .6rem;text-align:left;vertical-align:top}
+.v-LEAKED{color:#b91c1c;font-weight:600}.v-CLEAN{color:#15803d}
+.v-UNCERTAIN{color:#b45309}.v-INVALID{color:#6b7280}
+pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
+</style>
+</head>
+<body>
+{% if r.result == "ERROR" %}
+<div class="banner {{ r.result }}">{{ r.result }}: the run did not complete</div>
+{% elif r.result == "INCONCLUSIVE" %}
+<div class="banner {{ r.result }}">{{ r.result }}: {{ r.summary.leaked }} of {{ r.probes|length }} probes leaked after erasure; result could not be confirmed</div>
+{% else %}
+<div class="banner {{ r.result }}">{{ r.result }}: {{ r.summary.leaked }} of {{ r.probes|length }} probes leaked after erasure</div>
+{% endif %}
+<p>Target <b>{{ r.target }}</b> · scenario <b>{{ r.scenario.id }}</b> · run {{ r.run_id }} · {{ r.started_at }} to {{ r.finished_at }}</p>
+{% if r.error %}<p><b>Run error:</b> {{ r.error }}</p>{% endif %}
+
+<h2>Probes</h2>
+<table>
+<tr><th>Probe</th><th>Layer</th><th>Verdict</th><th>Reason</th></tr>
+{% for p in r.probes %}<tr><td>{{ p.probe_id }}</td><td>{{ p.layer }}</td><td class="v-{{ p.verdict }}">{{ p.verdict }}</td><td>{{ p.reason }}</td></tr>
+{% endfor %}</table>
+
+<h2>Leaks</h2>
+{% for c in leaks %}<div>
+<h3>{{ c.probe_id }}: {{ c.source }}</h3>
+<pre>{{ c.text }}</pre>
+<p>Code check: {{ c.code_hit or "no match" }} · judges:
+{% for name, v in c.votes.items() %}{{ name }}={{ "%.2f"|format(v) if v is not none else "n/a" }} {% endfor %}</p>
+</div>
+{% else %}<p>No leaks found.</p>
+{% endfor %}
+
+<h2>Findings</h2>
+<ul>{% for f in r.findings %}<li>{{ f }}</li>{% else %}<li>None</li>{% endfor %}</ul>
+
+<h2>Not covered</h2>
+<ul>{% for l in r.not_covered %}<li>The {{ l }} layer could not be observed (not reachable, or no probe saw the fact before erasure). Absence of evidence is not evidence of erasure.</li>{% else %}<li>All layers observed.</li>{% endfor %}</ul>
+
+<h2>Method</h2>
+<p>A synthetic fact about a made-up person ({{ r.scenario.subject.name }}) was planted with a unique marker{% if not r.redacted %} ({{ r.scenario.fact.canary }}){% endif %}, used in {{ r.scenario.exercise|length }} follow-up conversations, then erased with the {{ r.method }} method. Every probe ran before erasure (a probe that could not see the fact is INVALID), after erasure, and on a fresh space that never saw the fact. A result is LEAKED when the marker or a sensitive value appears, or when every semantic judge ({{ r.judges|join(", ") }}) is confident the text reveals the fact.</p>
+<p>Limits: the signature on this report proves the files were not altered after the run; it does not prove the run itself was honest. AI-based systems are non-deterministic, so a re-run can differ.</p>
+
+<h2>Reproduce</h2>
+<pre>erasewitness run --target {{ r.target }} --scenario {{ r.scenario.id }} --judges {{ r.judges|join(",") }}{% if r.method == "strict" %} --strict{% endif %}{% if r.redacted %} --redact-evidence{% endif %}</pre>
+</body>
+</html>

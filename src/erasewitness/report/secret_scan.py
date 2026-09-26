@@ -7,7 +7,10 @@ import re
 _PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_\-]{20,}"),
     re.compile(r"apikey_[A-Za-z0-9_]{20,}"),
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{20,}"),
+    re.compile(r"(?i)bearer(?:\s|\\n)+[A-Za-z0-9._\-]{20,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}"),
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),
 )
 
 

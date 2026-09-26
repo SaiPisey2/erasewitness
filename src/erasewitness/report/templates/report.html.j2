@@ -15,7 +15,13 @@ pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
 </style>
 </head>
 <body>
+{% if r.result == "ERROR" %}
+<div class="banner {{ r.result }}">{{ r.result }}: the run did not complete</div>
+{% elif r.result == "INCONCLUSIVE" %}
+<div class="banner {{ r.result }}">{{ r.result }}: {{ r.summary.leaked }} of {{ r.probes|length }} probes leaked after erasure; result could not be confirmed</div>
+{% else %}
 <div class="banner {{ r.result }}">{{ r.result }}: {{ r.summary.leaked }} of {{ r.probes|length }} probes leaked after erasure</div>
+{% endif %}
 <p>Target <b>{{ r.target }}</b> · scenario <b>{{ r.scenario.id }}</b> · run {{ r.run_id }} · {{ r.started_at }} to {{ r.finished_at }}</p>
 {% if r.error %}<p><b>Run error:</b> {{ r.error }}</p>{% endif %}
 
@@ -42,7 +48,7 @@ pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
 <ul>{% for l in r.not_covered %}<li>The {{ l }} layer could not be observed. Absence of evidence is not evidence of erasure.</li>{% else %}<li>All layers observed.</li>{% endfor %}</ul>
 
 <h2>Method</h2>
-<p>A synthetic fact about a made-up person ({{ r.scenario.subject.name }}) was planted with a unique marker ({{ r.scenario.fact.canary }}), used in {{ r.scenario.exercise|length }} follow-up conversations, then erased with the {{ r.scenario.erasure.method }} method. Every probe ran before erasure (a probe that could not see the fact is INVALID), after erasure, and on a fresh space that never saw the fact. A result is LEAKED when the marker or a sensitive value appears, or when every semantic judge ({{ r.judges|join(", ") }}) is confident the text reveals the fact.</p>
+<p>A synthetic fact about a made-up person ({{ r.scenario.subject.name }}) was planted with a unique marker{% if not r.redacted %} ({{ r.scenario.fact.canary }}){% endif %}, used in {{ r.scenario.exercise|length }} follow-up conversations, then erased with the {{ r.scenario.erasure.method }} method. Every probe ran before erasure (a probe that could not see the fact is INVALID), after erasure, and on a fresh space that never saw the fact. A result is LEAKED when the marker or a sensitive value appears, or when every semantic judge ({{ r.judges|join(", ") }}) is confident the text reveals the fact.</p>
 <p>Limits: the signature on this report proves the files were not altered after the run; it does not prove the run itself was honest. AI-based systems are non-deterministic, so a re-run can differ.</p>
 
 <h2>Reproduce</h2>

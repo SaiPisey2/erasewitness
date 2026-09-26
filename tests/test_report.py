@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -8,7 +9,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
 from erasewitness.report import SecretLeakError, write_run
-from erasewitness.runner import Runner, RunOutcome
+from erasewitness.report.secret_scan import scan
+from erasewitness.runner import Runner, RunOutcome, RunResult
 from erasewitness.scenario import Scenario, with_canary
 from erasewitness.signing import verify_run
 from erasewitness.targets.reference import ReferenceTarget
@@ -84,3 +86,84 @@ def test_secret_in_evidence_refuses_to_write(tmp_path: Path, salary: Scenario) -
         write_run(_leaky(scenario), tmp_path, KEY)
     assert fake_key not in str(info.value)
     assert not (tmp_path / "run-1").exists()
+
+
+def test_redact_covers_every_file(tmp_path: Path, salary: Scenario) -> None:
+    run_dir = write_run(_leaky(salary), tmp_path, KEY, redact=True)
+    forbidden = ["EW-004211", "42 LPA", "42 lakh", "4200000"]
+    for path in run_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        text = path.read_text()
+        for needle in forbidden:
+            assert needle not in text, f"{needle!r} leaked into {path.name}"
+
+
+def test_junit_error_run_is_not_green(tmp_path: Path, salary: Scenario) -> None:
+    outcome = RunOutcome(
+        run_id="run-1",
+        scenario=salary,
+        target="t",
+        judges=[],
+        result=RunResult.ERROR,
+        error="boom",
+    )
+    suite = ET.parse(write_run(outcome, tmp_path, KEY) / "junit.xml").getroot()
+    assert suite.get("errors") == "1"
+    run_case = next(c for c in suite if c.get("name") == "run")
+    assert run_case.find("error") is not None
+    assert run_case.find("error").get("message") == "boom"
+
+
+def test_junit_inconclusive_run_is_not_green(tmp_path: Path, salary: Scenario) -> None:
+    runner = Runner(lambda: ReferenceTarget("clean", settle_ok=False), Panel([OverlapJudge()]))
+    outcome = runner.run(salary, run_id="run-1")
+    assert outcome.result == RunResult.INCONCLUSIVE
+    suite = ET.parse(write_run(outcome, tmp_path, KEY) / "junit.xml").getroot()
+    assert int(suite.get("failures")) >= 1
+    run_case = next(c for c in suite if c.get("name") == "run")
+    assert run_case.find("failure") is not None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "AKIA" + "A" * 16,
+        "ghp_" + "a" * 36,
+        "AIza" + "b" * 35,
+        "Bearer\\n" + "c" * 25,
+    ],
+)
+def test_scan_catches_common_key_formats(text: str) -> None:
+    with pytest.raises(SecretLeakError):
+        scan({"f": text})
+
+
+def test_html_error_banner(tmp_path: Path, salary: Scenario) -> None:
+    outcome = RunOutcome(
+        run_id="run-1",
+        scenario=salary,
+        target="t",
+        judges=[],
+        result=RunResult.ERROR,
+        error="boom",
+    )
+    html = (write_run(outcome, tmp_path, KEY) / "report.html").read_text()
+    assert "the run did not complete" in html
+
+
+def test_evidence_name_collisions_do_not_overwrite(tmp_path: Path, salary: Scenario) -> None:
+    outcome = _leaky(salary)
+    outcome.probes[0] = dataclasses.replace(outcome.probes[0], probe_id="recall:a b")
+    outcome.probes[1] = dataclasses.replace(outcome.probes[1], probe_id="recall:a_b")
+    run_dir = write_run(outcome, tmp_path, KEY)
+    data = json.loads((run_dir / "result.json").read_text())
+    pointers = {
+        p["probe_id"]: p["evidence"]
+        for p in data["probes"]
+        if p["probe_id"] in ("recall:a b", "recall:a_b")
+    }
+    assert len(pointers) == 2
+    assert len(set(pointers.values())) == 2
+    for pointer in pointers.values():
+        assert (run_dir / pointer).is_file()

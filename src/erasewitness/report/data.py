@@ -86,6 +86,7 @@ def outcome_to_dict(outcome: RunOutcome, *, redact: bool = False) -> dict[str, A
         "scenario": scenario,
         "scenario_sha256": scenario_sha256,
         "redacted": redact,
+        "method": "strict" if outcome.strict else "vendor-default",
         "probes": [
             {
                 "probe_id": p.probe_id,

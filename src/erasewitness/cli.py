@@ -85,6 +85,13 @@ def run(
             err=True,
         )
 
+    try:
+        signing_key, created = load_or_create_key(key)
+    except (OSError, ValueError) as exc:
+        _fail(f"cannot load signing key {key}: {exc}")
+    if created:
+        typer.echo(f"created signing key {key}", err=True)
+
     runner = Runner(
         TARGETS[target],
         Panel([JUDGES[n]() for n in names]),
@@ -93,12 +100,6 @@ def run(
     )
     outcome = runner.run(loaded)
 
-    try:
-        signing_key, created = load_or_create_key(key)
-    except (OSError, ValueError) as exc:
-        _fail(f"cannot load signing key {key}: {exc}")
-    if created:
-        typer.echo(f"created signing key {key}", err=True)
     try:
         run_dir = write_run(outcome, out, signing_key, redact=redact_evidence)
     except SecretLeakError as exc:

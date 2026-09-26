@@ -138,6 +138,28 @@ def test_bad_key_file_exits_3(tmp_path: Path) -> None:
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
+def test_bad_key_fails_before_run(tmp_path: Path) -> None:
+    bad_key = tmp_path / "bad.key"
+    bad_key.write_text("not a key")
+    result = cli.invoke(
+        app,
+        [
+            "run",
+            "--target",
+            "reference-clean",
+            "--scenario",
+            "salary",
+            "--out",
+            str(tmp_path / "runs"),
+            "--key",
+            str(bad_key),
+        ],
+    )
+    combined = result.output + (result.stderr or "")
+    assert result.exit_code == 3, combined
+    assert "[plant]" not in combined
+
+
 def test_unwritable_out_exits_3(tmp_path: Path) -> None:
     out_path = tmp_path / "file"
     out_path.write_text("not a directory")

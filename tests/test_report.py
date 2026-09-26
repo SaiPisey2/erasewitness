@@ -10,7 +10,7 @@ from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
 from erasewitness.report import SecretLeakError, write_run
 from erasewitness.report.secret_scan import scan
-from erasewitness.runner import Runner, RunOutcome, RunResult
+from erasewitness.runner import RunConfig, Runner, RunOutcome, RunResult
 from erasewitness.scenario import Scenario, with_canary
 from erasewitness.signing import verify_run
 from erasewitness.targets.reference import ReferenceTarget
@@ -137,6 +137,31 @@ def test_junit_inconclusive_run_is_not_green(tmp_path: Path, salary: Scenario) -
 def test_scan_catches_common_key_formats(text: str) -> None:
     with pytest.raises(SecretLeakError):
         scan({"f": text})
+
+
+def test_report_names_strict_method(tmp_path: Path, salary: Scenario) -> None:
+    runner = Runner(
+        lambda: ReferenceTarget("leaky"), Panel([OverlapJudge()]), RunConfig(strict=True)
+    )
+    outcome = runner.run(salary, run_id="run-1")
+    run_dir = write_run(outcome, tmp_path, KEY)
+    data = json.loads((run_dir / "result.json").read_text())
+    assert data["method"] == "strict"
+    html = (run_dir / "report.html").read_text()
+    assert "strict method" in html
+    assert "--strict" in html
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "memory/risk-tolerance-and-investment-preferences.md",
+        "disk-encryption-settings-for-laptop",
+        "task-1234567890abcdefghij",
+    ],
+)
+def test_scan_ignores_words_ending_in_sk(text: str) -> None:
+    scan({"f": text})  # must not raise
 
 
 def test_html_error_banner(tmp_path: Path, salary: Scenario) -> None:

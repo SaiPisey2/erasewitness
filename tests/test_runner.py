@@ -232,6 +232,20 @@ def test_cleanup_failure_is_not_pass(salary: Scenario) -> None:
     assert sum(1 for f in outcome.findings if f.startswith("cleanup failed")) == 1
 
 
+def test_strict_run_records_method(salary: Scenario) -> None:
+    outcome = _run(lambda: ReferenceTarget("leaky"), salary, strict=True)
+    assert outcome.strict is True
+
+
+def test_all_invalid_layer_blocks_pass(salary: Scenario) -> None:
+    no_match = salary.model_copy(
+        update={"probes": salary.probes.model_copy(update={"recall": ["zzz-no-match"]})}
+    )
+    outcome = _run(lambda: ReferenceTarget("clean"), no_match)
+    assert outcome.result is RunResult.INCONCLUSIVE
+    assert "store" in outcome.not_covered
+
+
 def test_duplicate_recall_queries_deduplicated(salary: Scenario) -> None:
     dup = salary.model_copy(
         update={"probes": salary.probes.model_copy(update={"recall": ["salary", "salary"]})}

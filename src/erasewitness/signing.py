@@ -126,10 +126,25 @@ def verify_run(run_dir: Path, expected_fingerprint: str | None = None) -> Verify
         return VerifyResult(False, None, 0, [f"cannot read manifest or signature: {exc}"])
     try:
         manifest = json.loads(body)
+    except ValueError as exc:
+        return VerifyResult(False, None, 0, [f"malformed manifest: {exc}"])
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("version") != 1
+        or manifest.get("algorithm") != "ed25519"
+    ):
+        return VerifyResult(False, None, 0, ["malformed manifest: bad version or algorithm"])
+    try:
         public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(manifest["public_key"]))
         files: dict[str, str] = manifest["files"]
     except (ValueError, KeyError, TypeError) as exc:
         return VerifyResult(False, None, 0, [f"malformed manifest: {exc}"])
+    if not isinstance(files, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in files.items()
+    ):
+        return VerifyResult(
+            False, None, 0, ["malformed manifest: files must map strings to strings"]
+        )
 
     problems: list[str] = []
     try:

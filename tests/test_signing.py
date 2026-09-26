@@ -155,6 +155,16 @@ def test_verify_rejects_absolute_manifest_path(tmp_path: Path) -> None:
     assert "invalid path in manifest: /etc/hosts" in verify_run(run).problems
 
 
+def test_verify_malformed_manifest_files_list(tmp_path: Path) -> None:
+    run = _signed_dir(tmp_path)
+    manifest = json.loads((run / "manifest.json").read_text())
+    manifest["files"] = []
+    (run / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    result = verify_run(run)
+    assert not result.ok
+    assert result.problems[0].startswith("malformed manifest")
+
+
 def test_verify_empty_manifest(tmp_path: Path) -> None:
     run = tmp_path / "run"
     run.mkdir()

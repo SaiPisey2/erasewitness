@@ -45,13 +45,13 @@ pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
 <ul>{% for f in r.findings %}<li>{{ f }}</li>{% else %}<li>None</li>{% endfor %}</ul>
 
 <h2>Not covered</h2>
-<ul>{% for l in r.not_covered %}<li>The {{ l }} layer could not be observed. Absence of evidence is not evidence of erasure.</li>{% else %}<li>All layers observed.</li>{% endfor %}</ul>
+<ul>{% for l in r.not_covered %}<li>The {{ l }} layer could not be observed (not reachable, or no probe saw the fact before erasure). Absence of evidence is not evidence of erasure.</li>{% else %}<li>All layers observed.</li>{% endfor %}</ul>
 
 <h2>Method</h2>
-<p>A synthetic fact about a made-up person ({{ r.scenario.subject.name }}) was planted with a unique marker{% if not r.redacted %} ({{ r.scenario.fact.canary }}){% endif %}, used in {{ r.scenario.exercise|length }} follow-up conversations, then erased with the {{ r.scenario.erasure.method }} method. Every probe ran before erasure (a probe that could not see the fact is INVALID), after erasure, and on a fresh space that never saw the fact. A result is LEAKED when the marker or a sensitive value appears, or when every semantic judge ({{ r.judges|join(", ") }}) is confident the text reveals the fact.</p>
+<p>A synthetic fact about a made-up person ({{ r.scenario.subject.name }}) was planted with a unique marker{% if not r.redacted %} ({{ r.scenario.fact.canary }}){% endif %}, used in {{ r.scenario.exercise|length }} follow-up conversations, then erased with the {{ r.method }} method. Every probe ran before erasure (a probe that could not see the fact is INVALID), after erasure, and on a fresh space that never saw the fact. A result is LEAKED when the marker or a sensitive value appears, or when every semantic judge ({{ r.judges|join(", ") }}) is confident the text reveals the fact.</p>
 <p>Limits: the signature on this report proves the files were not altered after the run; it does not prove the run itself was honest. AI-based systems are non-deterministic, so a re-run can differ.</p>
 
 <h2>Reproduce</h2>
-<pre>erasewitness run --target {{ r.target }} --scenario {{ r.scenario.id }} --judges {{ r.judges|join(",") }}</pre>
+<pre>erasewitness run --target {{ r.target }} --scenario {{ r.scenario.id }} --judges {{ r.judges|join(",") }}{% if r.method == "strict" %} --strict{% endif %}{% if r.redacted %} --redact-evidence{% endif %}</pre>
 </body>
 </html>

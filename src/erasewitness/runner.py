@@ -68,6 +68,7 @@ class RunOutcome:
     findings: list[str] = field(default_factory=list)
     not_covered: list[str] = field(default_factory=list)
     leftovers: list[str] = field(default_factory=list)
+    strict: bool = False
     started_at: str = ""
     finished_at: str = ""
     error: str | None = None
@@ -203,6 +204,7 @@ class Runner:
 
             self._step("delete")
             strict = self._config.strict or scenario.erasure.method == "strict"
+            out.strict = strict
             strict_items = (
                 [j.item for j in out.snapshot if j.verdict is Verdict.LEAKED] if strict else None
             )
@@ -252,7 +254,21 @@ class Runner:
                 self._emit(
                     Event("probe", "judge", {"probe_id": spec.probe_id, "verdict": verdict.value})
                 )
+
+            unobserved_layer = False
+            for layer in {s.layer for s in specs}:
+                layer_probes = [p for p in out.probes if p.layer is layer]
+                if layer_probes and all(p.verdict is Verdict.INVALID for p in layer_probes):
+                    unobserved_layer = True
+                    if layer.value not in out.not_covered:
+                        out.not_covered.append(layer.value)
+                    out.findings.append(
+                        f"{layer.value} layer: no probe could observe the fact before erasure"
+                    )
+
             out.result = overall(out.probes)
+            if out.result is RunResult.PASS and unobserved_layer:
+                out.result = RunResult.INCONCLUSIVE
         except Exception as exc:  # the run must always produce an outcome
             out.result = RunResult.ERROR
             out.error = f"{type(exc).__name__}: {exc}"

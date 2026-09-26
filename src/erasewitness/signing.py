@@ -22,16 +22,20 @@ _SIGNATURE = "manifest.sig"
 
 
 def generate_key(path: Path, *, force: bool = False) -> Ed25519PrivateKey:
-    if path.exists() and not force:
-        raise FileExistsError(str(path))
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if force:
+        path.unlink(missing_ok=True)
     key = Ed25519PrivateKey.generate()
     pem = key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
         serialization.NoEncryption(),
     )
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    # O_EXCL closes the check-then-create race: the OS rejects the open atomically
+    # if anything (including a symlink) already occupies the path. O_NOFOLLOW is
+    # defense in depth on platforms that provide it.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
     with os.fdopen(fd, "wb") as fh:
         fh.write(pem)
     os.chmod(path, 0o600)
@@ -65,11 +69,35 @@ def _sha256(path: Path) -> str:
 
 
 def _files(run_dir: Path) -> list[str]:
-    rels = (p.relative_to(run_dir).as_posix() for p in run_dir.rglob("*") if p.is_file())
+    rels = (
+        p.relative_to(run_dir).as_posix()
+        for p in run_dir.rglob("*")
+        if p.is_file() and not p.is_symlink()
+    )
     return sorted(r for r in rels if r not in {_MANIFEST, _SIGNATURE})
 
 
+def _symlinks(run_dir: Path) -> list[str]:
+    return sorted(p.relative_to(run_dir).as_posix() for p in run_dir.rglob("*") if p.is_symlink())
+
+
+def _unsafe_relpath(run_dir: Path, rel: str) -> bool:
+    """True if `rel` is absolute, escapes `run_dir` via "..", or resolves outside it."""
+    candidate = Path(rel)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return True
+    try:
+        resolved = (run_dir / rel).resolve()
+        resolved.relative_to(run_dir.resolve())
+    except ValueError:
+        return True
+    return False
+
+
 def sign_run(run_dir: Path, key: Ed25519PrivateKey) -> None:
+    symlinks = _symlinks(run_dir)
+    if symlinks:
+        raise ValueError(f"refusing to sign symlink: {symlinks[0]}")
     manifest = {
         "version": 1,
         "algorithm": "ed25519",
@@ -87,9 +115,10 @@ class VerifyResult:
     fingerprint: str | None
     files_checked: int
     problems: list[str]
+    pinned: bool = False
 
 
-def verify_run(run_dir: Path) -> VerifyResult:
+def verify_run(run_dir: Path, expected_fingerprint: str | None = None) -> VerifyResult:
     try:
         body = (run_dir / _MANIFEST).read_bytes()
         signature = base64.b64decode((run_dir / _SIGNATURE).read_text())
@@ -107,7 +136,14 @@ def verify_run(run_dir: Path) -> VerifyResult:
         public_key.verify(signature, body)
     except InvalidSignature:
         problems.append("signature does not match manifest")
+
+    if not files:
+        problems.append("manifest lists no files")
+
     for rel, digest in sorted(files.items()):
+        if _unsafe_relpath(run_dir, rel):
+            problems.append(f"invalid path in manifest: {rel}")
+            continue
         path = run_dir / rel
         if not path.is_file():
             problems.append(f"missing file: {rel}")
@@ -116,4 +152,17 @@ def verify_run(run_dir: Path) -> VerifyResult:
     for rel in _files(run_dir):
         if rel not in files:
             problems.append(f"unlisted file: {rel}")
-    return VerifyResult(not problems, fingerprint(public_key), len(files), problems)
+    for rel in _symlinks(run_dir):
+        problems.append(f"symlink in run folder: {rel}")
+
+    actual_fingerprint = fingerprint(public_key)
+    pinned = False
+    if expected_fingerprint is not None:
+        if actual_fingerprint != expected_fingerprint:
+            problems.append(
+                f"signer {actual_fingerprint} does not match expected {expected_fingerprint}"
+            )
+        else:
+            pinned = True
+
+    return VerifyResult(not problems, actual_fingerprint, len(files), problems, pinned)

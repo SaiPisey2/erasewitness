@@ -2,11 +2,11 @@ from collections.abc import Callable
 
 from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
-from erasewitness.runner import STEPS, Event, RunConfig, Runner, RunOutcome
+from erasewitness.runner import STEPS, Event, RunConfig, Runner, RunOutcome, probe_specs
 from erasewitness.scenario import Scenario
 from erasewitness.targets.base import Target
 from erasewitness.targets.reference import ReferenceTarget
-from erasewitness.types import RunResult, Verdict
+from erasewitness.types import EraseResult, Item, RunResult, Verdict
 
 
 def _verdicts(outcome: RunOutcome) -> dict[str, Verdict]:
@@ -115,6 +115,7 @@ class _Exploding(ReferenceTarget):
 
 
 def test_target_crash_is_error_and_cleans_up(salary: Scenario) -> None:
+    _Exploding.cleaned = False
     outcome = _run(lambda: _Exploding("clean"), salary)
     assert outcome.result is RunResult.ERROR
     assert outcome.error is not None and "target crashed" in outcome.error
@@ -131,3 +132,109 @@ def test_events_follow_step_order(salary: Scenario) -> None:
     assert len([e for e in events if e.kind == "probe"]) == 5
     assert events[-1].kind == "done"
     assert events[-1].data == {"result": "PASS"}
+
+
+class _LateIngest(ReferenceTarget):
+    """Plants text but only ingests it into the store during erase() (late ingestion)."""
+
+    def __init__(self) -> None:
+        super().__init__("clean")
+        self._pending: str | None = None
+
+    def plant(self, text: str) -> None:
+        self._pending = text
+
+    def erase(self, scenario: Scenario, strict_items: list[Item] | None) -> EraseResult:
+        result = super().erase(scenario, strict_items)
+        if self._pending is not None:
+            self._add(self._pending)
+            self._pending = None
+        return result
+
+
+def test_leak_after_unconfirmed_before_is_leaked(salary: Scenario) -> None:
+    outcome = _run(lambda: _LateIngest(), salary)
+    assert outcome.result is RunResult.FAIL
+    assert _verdicts(outcome)["recall:salary"] is Verdict.LEAKED
+
+
+class _FlakyOnce:
+    """Raises on its very first call ever, then behaves like OverlapJudge."""
+
+    name = "flaky"
+
+    def __init__(self) -> None:
+        self._calls = 0
+        self._overlap = OverlapJudge()
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        self._calls += 1
+        if self._calls == 1:
+            raise RuntimeError("hiccup")
+        return self._overlap.judge(fact, question, texts)
+
+
+def test_judge_error_in_one_step_is_not_pass(salary: Scenario) -> None:
+    outcome = _run(lambda: ReferenceTarget("clean"), salary, Panel([_FlakyOnce()]))
+    assert outcome.result is RunResult.INCONCLUSIVE
+    assert any("judge error:" in f for f in outcome.findings)
+
+
+def test_panel_errors_do_not_carry_over(salary: Scenario) -> None:
+    panel = Panel([_FlakyOnce()])
+    first = _run(lambda: ReferenceTarget("clean"), salary, panel)
+    assert any("judge error:" in f for f in first.findings)
+    second = _run(lambda: ReferenceTarget("clean"), salary, panel)
+    assert second.result is RunResult.PASS
+    assert not any("judge error" in f for f in second.findings)
+
+
+def test_factory_error_is_error_not_raise(salary: Scenario) -> None:
+    def _boom() -> ReferenceTarget:
+        raise RuntimeError("no creds")
+
+    outcome = _run(_boom, salary)
+    assert outcome.result is RunResult.ERROR
+    assert outcome.error is not None and "no creds" in outcome.error
+
+
+def test_event_callback_error_is_ignored(salary: Scenario) -> None:
+    def _boom_on_event(event: Event) -> None:
+        raise RuntimeError("callback broke")
+
+    runner = Runner(
+        lambda: ReferenceTarget("clean"), Panel([OverlapJudge()]), on_event=_boom_on_event
+    )
+    outcome = runner.run(salary, run_id="run-1")
+    assert outcome.result is RunResult.PASS
+
+
+class _ErasesThenFails(ReferenceTarget):
+    def erase(self, scenario: Scenario, strict_items: list[Item] | None) -> EraseResult:
+        super().erase(scenario, strict_items)
+        raise RuntimeError("504")
+
+
+def test_erase_error_after_deleting_is_not_pass(salary: Scenario) -> None:
+    outcome = _run(lambda: _ErasesThenFails("clean"), salary)
+    assert outcome.result is RunResult.INCONCLUSIVE
+    assert any("vendor erasure call failed" in f for f in outcome.findings)
+
+
+class _CleanupFails(ReferenceTarget):
+    def cleanup(self) -> list[str]:
+        raise RuntimeError("cleanup boom")
+
+
+def test_cleanup_failure_is_not_pass(salary: Scenario) -> None:
+    outcome = _run(lambda: _CleanupFails("clean"), salary)
+    assert outcome.result is RunResult.INCONCLUSIVE
+    assert sum(1 for f in outcome.findings if f.startswith("cleanup failed")) == 1
+
+
+def test_duplicate_recall_queries_deduplicated(salary: Scenario) -> None:
+    dup = salary.model_copy(
+        update={"probes": salary.probes.model_copy(update={"recall": ["salary", "salary"]})}
+    )
+    ids = [s.probe_id for s in probe_specs(dup)]
+    assert ids.count("recall:salary") == 1

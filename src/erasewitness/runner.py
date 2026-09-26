@@ -82,7 +82,13 @@ def new_run_id() -> str:
 
 
 def probe_specs(scenario: Scenario) -> list[ProbeSpec]:
-    specs = [ProbeSpec(f"recall:{q}", Layer.STORE, q) for q in scenario.probes.recall]
+    seen: set[str] = set()
+    specs = []
+    for q in scenario.probes.recall:
+        if q in seen:
+            continue
+        seen.add(q)
+        specs.append(ProbeSpec(f"recall:{q}", Layer.STORE, q))
     specs.append(ProbeSpec("derived", Layer.DERIVED, ""))
     specs += [
         ProbeSpec(f"ask:{i}", Layer.BEHAVIOUR, p.question)
@@ -106,7 +112,17 @@ def final_verdict(
     control: Sequence[ItemJudgement],
     settled: bool,
 ) -> tuple[Verdict, str]:
-    if aggregate(before) is not Verdict.LEAKED:
+    before_verdict = aggregate(before)
+    if before_verdict is not Verdict.LEAKED:
+        if any(j.code_hit is not None for j in after):
+            return Verdict.LEAKED, "canary or sensitive value found after erasure"
+        if before_verdict is Verdict.UNCERTAIN:
+            return Verdict.UNCERTAIN, "could not confirm the fact was observable before erasure"
+        if aggregate(after) is Verdict.LEAKED:
+            return (
+                Verdict.UNCERTAIN,
+                "fact not confirmed before erasure but observable after",
+            )
         return Verdict.INVALID, "fact was not observable through this probe before erasure"
     after_verdict = aggregate(after)
     if after_verdict is Verdict.LEAKED:
@@ -150,17 +166,21 @@ class Runner:
     def run(self, scenario: Scenario, run_id: str | None = None) -> RunOutcome:
         scenario = with_canary(scenario)
         rid = run_id or new_run_id()
-        target = self._factory()
+        self._panel.errors.clear()
         out = RunOutcome(
             run_id=rid,
             scenario=scenario,
-            target=target.name,
+            target="unknown",
             judges=self._panel.names,
             started_at=_now(),
         )
+        target: Target | None = None
         control: Target | None = None
+        erase_ok = True
         try:
             self._step("setup")
+            target = self._factory()
+            out.target = target.name
             target.setup(rid)
             out.versions = dict(target.version_info())
             coverage = target.coverage()
@@ -171,7 +191,8 @@ class Runner:
             target.plant(scenario.fact.plant_as)
             self._step("exercise")
             target.exercise(scenario.exercise)
-            if not target.settle(self._config.settle_timeout_s):
+            settled_before = target.settle(self._config.settle_timeout_s)
+            if not settled_before:
                 out.findings.append("settle before erasure timed out")
 
             self._step("control+")
@@ -186,13 +207,15 @@ class Runner:
                 [j.item for j in out.snapshot if j.verdict is Verdict.LEAKED] if strict else None
             )
             erase = self._erase(target, scenario, strict_items)
+            erase_ok = erase.ok
             if not erase.ok:
                 out.findings.append(f"vendor erasure call failed: {erase.detail}")
 
             self._step("settle")
-            settled = target.settle(self._config.settle_timeout_s)
-            if not settled:
+            settled_after = target.settle(self._config.settle_timeout_s)
+            if not settled_after:
                 out.findings.append("settle after erasure timed out; CLEAN results downgraded")
+            settled = settled_before and settled_after
 
             self._step("probe")
             after = {s.probe_id: self._observe(target, s, scenario) for s in specs}
@@ -206,7 +229,8 @@ class Runner:
             control = self._factory()
             control.setup(f"{rid}-control")
             control.exercise(scenario.exercise)
-            control.settle(self._config.settle_timeout_s)
+            if not control.settle(self._config.settle_timeout_s):
+                out.findings.append("control space settle timed out")
             ctrl = {s.probe_id: self._observe(control, s, scenario) for s in specs}
 
             self._step("judge")
@@ -233,10 +257,23 @@ class Runner:
             out.result = RunResult.ERROR
             out.error = f"{type(exc).__name__}: {exc}"
         finally:
-            out.leftovers = self._cleanup(target)
+            cleanup_findings: list[str] = []
+            if target is not None:
+                leftovers, cleanup_error = self._cleanup(target)
+                out.leftovers += leftovers
+                if cleanup_error is not None:
+                    cleanup_findings.append(cleanup_error)
             if control is not None:
-                out.leftovers += self._cleanup(control)
+                leftovers, cleanup_error = self._cleanup(control)
+                out.leftovers += leftovers
+                if cleanup_error is not None and cleanup_error not in cleanup_findings:
+                    cleanup_findings.append(cleanup_error)
+            out.findings += cleanup_findings
             out.findings += [f"judge error: {e}" for e in self._panel.errors]
+            if out.result is RunResult.PASS and (
+                self._panel.errors or not erase_ok or cleanup_findings
+            ):
+                out.result = RunResult.INCONCLUSIVE
             out.finished_at = _now()
             self._emit(Event("done", "report", {"result": out.result.value}))
         return out
@@ -271,15 +308,18 @@ class Runner:
         )
 
     @staticmethod
-    def _cleanup(target: Target) -> list[str]:
+    def _cleanup(target: Target) -> tuple[list[str], str | None]:
         try:
-            return target.cleanup()
+            return target.cleanup(), None
         except Exception as exc:
-            return [f"cleanup failed: {type(exc).__name__}: {exc}"]
+            return [], f"cleanup failed: {type(exc).__name__}: {exc}"
 
     def _step(self, name: str) -> None:
         self._emit(Event("step", name))
 
     def _emit(self, event: Event) -> None:
         if self._on_event is not None:
-            self._on_event(event)
+            try:
+                self._on_event(event)
+            except Exception:  # a broken observer must not affect the run
+                pass

@@ -44,7 +44,7 @@ A probe that could not see the fact before deletion proves nothing, so it is mar
 ## Try it
 
 ```bash
-pip install 'erasewitness[judges,mem0]'
+pip install "erasewitness[judges,mem0] @ git+https://github.com/SaiPisey2/erasewitness@v0.1.0"
 export TYPESAFE_API_KEY=...   # Jev
 export OPENAI_API_KEY=...
 

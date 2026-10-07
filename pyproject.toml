@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "erasewitness"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Prove whether an AI agent's memory really forgot."
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -18,7 +18,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11", "types-PyYAML"]
+judges = ["typesafe-sdk>=0.7.1,<0.8", "system-one-adapter[openai]>=0.2.1,<0.3"]
+mem0 = ["mem0ai>=2.2.1,<2.3"]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-PyYAML",
+  "typesafe-sdk>=0.7.1,<0.8",
+  "system-one-adapter[openai]>=0.2.1,<0.3",
+  "mem0ai>=2.2.1,<2.3",
+]
 
 [project.scripts]
 erasewitness = "erasewitness.cli:app"

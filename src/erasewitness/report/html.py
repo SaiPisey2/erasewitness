@@ -6,7 +6,10 @@ from typing import Any
 
 from jinja2 import Environment, PackageLoader
 
+from erasewitness.judges.budget import format_usd
+
 _ENV = Environment(loader=PackageLoader("erasewitness.report", "templates"), autoescape=True)
+_ENV.filters["usd"] = format_usd
 
 
 def _leak_cards(data: dict[str, Any], evidence: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:

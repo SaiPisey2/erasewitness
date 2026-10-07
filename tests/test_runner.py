@@ -1,9 +1,12 @@
 from collections.abc import Callable
+from pathlib import Path
 
 from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
+from erasewitness.report import write_run
 from erasewitness.runner import STEPS, Event, RunConfig, Runner, RunOutcome, probe_specs
 from erasewitness.scenario import Scenario
+from erasewitness.signing import generate_key
 from erasewitness.targets.base import Target
 from erasewitness.targets.reference import ReferenceTarget
 from erasewitness.types import EraseResult, Item, RunResult, Verdict
@@ -60,7 +63,7 @@ def test_overdelete_reports_collateral(salary: Scenario) -> None:
     outcome = _run(lambda: ReferenceTarget("overdelete"), salary)
     assert outcome.result is RunResult.PASS
     assert outcome.collateral == ["history:m1", "memory:m1"]
-    assert any("collateral deletion" in f for f in outcome.findings)
+    assert any("over-deletion" in f for f in outcome.findings)
 
 
 def test_settle_timeout_downgrades_clean(salary: Scenario) -> None:
@@ -252,3 +255,43 @@ def test_duplicate_recall_queries_deduplicated(salary: Scenario) -> None:
     )
     ids = [s.probe_id for s in probe_specs(dup)]
     assert ids.count("recall:salary") == 1
+
+
+def test_runner_records_budget_and_usage(salary: Scenario) -> None:
+    from erasewitness.judges.budget import Budget
+
+    runner = Runner(
+        lambda: ReferenceTarget("clean"), Panel([OverlapJudge()], budget=Budget(limit_usd=2.0))
+    )
+    outcome = runner.run(salary, run_id="run-1")
+    assert outcome.budget_usd == 2.0
+    assert outcome.scenario_ref == "salary"
+    calls = outcome.judge_usage["overlap"]["calls"]
+    assert isinstance(calls, int) and calls > 0
+
+
+class _KeyLeaker:
+    name = "leaker"
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        raise RuntimeError("bad key sk-" + "A" * 30)
+
+
+def test_judge_error_with_key_is_masked_and_run_still_writes(
+    salary: Scenario, tmp_path: Path
+) -> None:
+    outcome = _run(lambda: ReferenceTarget("clean"), salary, Panel([_KeyLeaker()]))
+    run_dir = write_run(outcome, tmp_path, generate_key(tmp_path / "k.key"))
+    text = (run_dir / "result.json").read_text()
+    assert "[redacted]" in text
+    assert "sk-" + "A" * 30 not in text
+
+
+def test_runner_notes_do_not_change_result(salary: Scenario) -> None:
+    class Noted(ReferenceTarget):
+        def notes(self) -> list[str]:
+            return ["x"]
+
+    outcome = _run(lambda: Noted("clean"), salary)
+    assert outcome.result is RunResult.PASS
+    assert "note: x" in outcome.findings

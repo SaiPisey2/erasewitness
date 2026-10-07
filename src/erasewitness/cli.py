@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+import math
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +12,10 @@ from typing import Annotated, NoReturn
 
 import typer
 
-from erasewitness.judges.base import SemanticJudge
+from erasewitness.judges.base import JudgeConfigError, SemanticJudge
+from erasewitness.judges.budget import Budget, format_usd
+from erasewitness.judges.jev import JevJudge
+from erasewitness.judges.openai_judge import OpenAIJudge
 from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
 from erasewitness.report import SecretLeakError, write_run
@@ -34,7 +40,11 @@ app = typer.Typer(
 scenarios_app = typer.Typer(no_args_is_help=True, help="Built-in scenarios.")
 app.add_typer(scenarios_app, name="scenarios")
 
-JUDGES: dict[str, Callable[[], SemanticJudge]] = {"overlap": OverlapJudge}
+JUDGES: dict[str, Callable[[], SemanticJudge]] = {
+    "overlap": OverlapJudge,
+    "jev": JevJudge,
+    "openai": OpenAIJudge,
+}
 EXIT_CODES = {RunResult.PASS: 0, RunResult.FAIL: 1, RunResult.INCONCLUSIVE: 2, RunResult.ERROR: 3}
 
 
@@ -70,15 +80,33 @@ def run(
     redact_evidence: Annotated[
         bool, typer.Option(help="Store hashes instead of evidence text.")
     ] = False,
+    budget: Annotated[
+        float,
+        typer.Option(
+            help="Maximum JUDGE spend in USD for this run (target-side calls are not capped)."
+        ),
+    ] = 1.0,
 ) -> None:
     """Plant a fact, erase it, probe every layer and write a signed report."""
     loaded = _load(scenario)
     if target not in TARGETS:
         _fail(f"unknown target '{target}' (known: {', '.join(sorted(TARGETS))})")
     names = [n.strip() for n in judges.split(",") if n.strip()]
+    names = list(dict.fromkeys(names))
     unknown = [n for n in names if n not in JUDGES]
     if unknown or not names:
         _fail(f"unknown judge '{','.join(unknown)}' (known: {', '.join(sorted(JUDGES))})")
+    if not math.isfinite(budget) or budget < 0:
+        _fail("--budget must be a finite number >= 0")
+    try:
+        judge_objs = [JUDGES[n]() for n in names]
+    except JudgeConfigError as exc:
+        _fail(str(exc))
+    if target == "mem0":
+        if not os.environ.get("OPENAI_API_KEY", "").strip():
+            _fail("the mem0 target needs OPENAI_API_KEY")
+        if importlib.util.find_spec("mem0") is None:
+            _fail("the mem0 target needs: pip install 'erasewitness[mem0]'")
     if "overlap" in names:
         typer.echo(
             "warning: the overlap judge is an offline heuristic; results are not evidence",
@@ -94,11 +122,11 @@ def run(
 
     runner = Runner(
         TARGETS[target],
-        Panel([JUDGES[n]() for n in names]),
+        Panel(judge_objs, budget=Budget(limit_usd=budget)),
         RunConfig(strict=strict),
         on_event=_print_event,
     )
-    outcome = runner.run(loaded)
+    outcome = runner.run(loaded, scenario_ref=scenario)
 
     try:
         run_dir = write_run(outcome, out, signing_key, redact=redact_evidence)
@@ -111,6 +139,11 @@ def run(
     typer.echo(
         f"{outcome.result.value}: {leaked} of {len(outcome.probes)} probes leaked after erasure"
     )
+    total_cost = sum(u["cost_usd"] for u in outcome.judge_usage.values())
+    typer.echo(f"judge cost: ${total_cost:.4f} of ${format_usd(budget)} budget")
+    for finding in outcome.findings:
+        if finding.startswith("judge error:"):
+            typer.echo(finding, err=True)
     if outcome.error:
         typer.echo(f"run error: {outcome.error}", err=True)
     typer.echo(f"report: {run_dir / 'report.html'}")

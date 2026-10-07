@@ -15,7 +15,12 @@ def _prepared(mode: str, salary: Scenario, **kw: bool) -> ReferenceTarget:
 
 
 def test_registry_names() -> None:
-    assert sorted(TARGETS) == ["reference-clean", "reference-leaky", "reference-overdelete"]
+    assert sorted(TARGETS) == [
+        "mem0",
+        "reference-clean",
+        "reference-leaky",
+        "reference-overdelete",
+    ]
     assert create_target("reference-leaky").name == "reference-leaky"
     with pytest.raises(KeyError):
         create_target("nope")
@@ -33,6 +38,7 @@ def test_summary_is_reworded_without_digits(salary: Scenario) -> None:
     assert "salary" in summary.text
     assert "42" not in summary.text
     assert "EW-004211" not in summary.text
+    assert "four-two" in summary.text
 
 
 def test_clean_erase_removes_everything(salary: Scenario) -> None:
@@ -79,3 +85,17 @@ def test_recorded_edges_and_cleanup(salary: Scenario) -> None:
     assert [(e.src, e.dst) for e in target.recorded_edges()] == [("memory:m1", "history:m1")]
     assert target.cleanup() == []
     assert target.snapshot() == []
+
+
+def test_summary_spells_phone_digits() -> None:
+    from erasewitness.scenario import load_scenario, with_canary
+
+    phone = with_canary(load_scenario("phone-number"), canary="EW-000001")
+    target = ReferenceTarget("leaky")
+    target.setup("run-1")
+    target.plant(phone.fact.plant_as)
+    target.exercise(phone.exercise)
+    summary = [i for i in target.probe_derived() if i.source == "summary"][0]
+    assert "nine-eight-seven-six-five" in summary.text
+    assert "EW-000001" not in summary.text
+    assert not any(ch.isdigit() for ch in summary.text)

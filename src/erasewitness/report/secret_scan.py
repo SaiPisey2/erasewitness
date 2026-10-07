@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import re
 
+_B = r"(?:(?<![A-Za-z0-9])|(?<=\\[nrt]))"
+
 _PATTERNS = (
-    re.compile(r"(?<![A-Za-z0-9])sk-(?:proj-|ant-)?[A-Za-z0-9_\-]{20,}"),
-    re.compile(r"(?<![A-Za-z0-9])apikey_[A-Za-z0-9_]{20,}"),
+    re.compile(_B + r"sk-(?:proj-|ant-)?[A-Za-z0-9_\-]{20,}"),
+    re.compile(_B + r"apikey_[A-Za-z0-9_]{20,}"),
     re.compile(r"(?i)bearer(?:\s|\\n)+[A-Za-z0-9._\-]{20,}"),
-    re.compile(r"(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}"),
-    re.compile(r"(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36,}"),
-    re.compile(r"(?<![A-Za-z0-9])AIza[0-9A-Za-z_\-]{35}"),
+    re.compile(_B + r"AKIA[0-9A-Z]{16}"),
+    re.compile(_B + r"gh[pousr]_[A-Za-z0-9]{36,}"),
+    re.compile(_B + r"AIza[0-9A-Za-z_\-]{35}"),
 )
 
 
@@ -24,3 +26,9 @@ def scan(files: dict[str, str]) -> None:
             raise SecretLeakError(
                 f"refusing to write report: {name} contains something that looks like an API key"
             )
+
+
+def redact(text: str) -> str:
+    for pattern in _PATTERNS:
+        text = pattern.sub("[redacted]", text)
+    return text

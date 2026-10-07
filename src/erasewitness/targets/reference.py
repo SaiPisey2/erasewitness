@@ -9,11 +9,16 @@ from erasewitness.scenario import Scenario
 from erasewitness.types import Edge, EraseResult, Item, Layer
 
 Mode = Literal["clean", "leaky", "overdelete"]
-_DIGIT_TOKEN = re.compile(r"\S*\d\S*")
+_REFERENCE = re.compile(r"\(reference EW-\d+\)")
+_CANARY = re.compile(r"EW-\d+")
+_DIGITS = re.compile(r"\d+")
+_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
 
 
-def _strip_digit_tokens(text: str) -> str:
-    return " ".join(_DIGIT_TOKEN.sub("", text).split())
+def _paraphrase(text: str) -> str:
+    text = _CANARY.sub("", _REFERENCE.sub("", text))
+    text = _DIGITS.sub(lambda m: "-".join(_WORDS[int(d)] for d in m.group()), text)
+    return " ".join(text.split())
 
 
 class ReferenceTarget:
@@ -47,7 +52,7 @@ class ReferenceTarget:
 
     def exercise(self, turns: list[str]) -> None:
         if self.memories:
-            rewritten = " ".join(_strip_digit_tokens(t) for t in self.memories.values())
+            rewritten = " ".join(_paraphrase(t) for t in self.memories.values())
             self.summary = f"Summary of past chats: {rewritten}"
 
     def settle(self, timeout_s: float) -> bool:

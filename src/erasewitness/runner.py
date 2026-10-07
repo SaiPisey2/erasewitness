@@ -167,7 +167,7 @@ class Runner:
     def run(self, scenario: Scenario, run_id: str | None = None) -> RunOutcome:
         scenario = with_canary(scenario)
         rid = run_id or new_run_id()
-        self._panel.errors.clear()
+        self._panel.reset()
         out = RunOutcome(
             run_id=rid,
             scenario=scenario,

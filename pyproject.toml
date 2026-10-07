@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 judges = ["typesafe-sdk>=0.7.1,<0.8", "system-one-adapter[openai]>=0.2.1,<0.3"]
+mem0 = ["mem0ai>=2.2.1,<2.3"]
 dev = [
   "pytest>=8",
   "ruff>=0.6",
@@ -26,6 +27,7 @@ dev = [
   "types-PyYAML",
   "typesafe-sdk>=0.7.1,<0.8",
   "system-one-adapter[openai]>=0.2.1,<0.3",
+  "mem0ai>=2.2.1,<2.3",
 ]
 
 [project.scripts]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from erasewitness.judges.base import JudgeUsage, SemanticJudge
+from erasewitness.judges.base import SemanticJudge
 from erasewitness.judges.budget import Budget
 from erasewitness.judges.ensemble import Thresholds, decide
 from erasewitness.normalise import first_match
@@ -45,7 +45,10 @@ class Panel:
         for judge in self._judges:
             usage = getattr(judge, "usage", None)
             if usage is not None:
-                judge.usage = JudgeUsage(model=usage.model)
+                usage.calls = 0
+                usage.input_tokens = 0
+                usage.output_tokens = 0
+                usage.cost_usd = 0.0
 
     def judge_items(self, scenario: Scenario, items: Sequence[Item]) -> list[ItemJudgement]:
         if not items:
@@ -66,16 +69,24 @@ class Panel:
     ) -> list[float | None]:
         fact, question = scenario.fact.statement, scenario.judge.question
         estimate = getattr(judge, "estimate_cost", None)
-        est = estimate(fact, question, texts) if estimate else 0.0
-        if self.budget is not None and not self.budget.allows(est):
-            if id(judge) not in self._refused:
-                self._refused.add(id(judge))
-                self._record(
-                    f"{judge.name}: budget exceeded "
-                    f"(spent ${self.budget.spent_usd:.4f} of ${self.budget.limit_usd:.2f})"
-                )
-            return [None] * len(texts)
         usage = getattr(judge, "usage", None)
+        est = 0.0
+        if estimate:
+            try:
+                est = estimate(fact, question, texts)
+            except Exception as exc:
+                self._record(f"{judge.name}: cost estimate failed: {exc}")
+                return [None] * len(texts)
+            if not isinstance(est, (int, float)) or est < 0:
+                self._record(f"{judge.name}: invalid cost estimate")
+                return [None] * len(texts)
+        if self.budget is not None:
+            gated = not self.budget.allows(est)
+            if not estimate and usage and self.budget.exhausted:
+                gated = True
+            if gated:
+                self._refuse(judge)
+                return [None] * len(texts)
         before = usage.cost_usd if usage else 0.0
         try:
             probs = list(judge.judge(fact, question, texts))
@@ -85,6 +96,8 @@ class Panel:
         finally:
             if self.budget is not None and usage:
                 self.budget.charge(usage.cost_usd - before)
+                if self.budget.spent_usd > self.budget.limit_usd:
+                    self._refuse(judge)
 
         def _valid(p: object) -> bool:
             return isinstance(p, (int, float)) and not isinstance(p, bool) and 0.0 <= p <= 1.0
@@ -93,6 +106,14 @@ class Panel:
             self._record(f"{judge.name}: malformed response")
             return [None] * len(texts)
         return [float(p) for p in probs]
+
+    def _refuse(self, judge: SemanticJudge) -> None:
+        if self.budget is not None and id(judge) not in self._refused:
+            self._refused.add(id(judge))
+            self._record(
+                f"{judge.name}: budget exceeded "
+                f"(spent ${self.budget.spent_usd:.4f} of ${self.budget.limit_usd:.2f})"
+            )
 
     def _record(self, message: str) -> None:
         if message not in self.errors:

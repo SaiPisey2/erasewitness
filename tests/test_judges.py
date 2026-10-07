@@ -182,3 +182,79 @@ def test_panel_usage_report_and_non_evidence(salary: Scenario) -> None:
     assert report["overlap"]["calls"] == 1
     assert report["paid"]["cost_usd"] == pytest.approx(0.01)
     assert panel.non_evidence == ["overlap"]
+
+
+def test_single_call_overshoot_is_recorded(salary: Scenario) -> None:
+    judge = _Paid(per_call=5.0, estimate=0.1)
+    panel = Panel([judge], budget=Budget(limit_usd=1.0))
+    panel.judge_items(salary, ITEMS)
+    assert len([e for e in panel.errors if "budget exceeded" in e]) == 1
+
+
+class _BadEstimate:
+    name = "bad"
+    evidence = True
+
+    def __init__(self) -> None:
+        self.usage = JudgeUsage(model="m")
+        self.called = False
+
+    def estimate_cost(self, fact: str, question: str, texts: list[str]) -> float:
+        raise RuntimeError("bad price")
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        self.called = True
+        return [0.9 for _ in texts]
+
+
+def test_estimate_failure_degrades(salary: Scenario) -> None:
+    judge = _BadEstimate()
+    panel = Panel([judge], budget=Budget(limit_usd=1.0))
+    out = panel.judge_items(salary, ITEMS)
+    assert out[1].verdict is Verdict.UNCERTAIN
+    assert "bad: cost estimate failed: bad price" in panel.errors
+    assert not judge.called
+
+
+class _NegEstimate(_BadEstimate):
+    def estimate_cost(self, fact: str, question: str, texts: list[str]) -> float:
+        return -1.0
+
+
+def test_negative_estimate_is_invalid(salary: Scenario) -> None:
+    judge = _NegEstimate()
+    panel = Panel([judge], budget=Budget(limit_usd=1.0))
+    panel.judge_items(salary, ITEMS)
+    assert "bad: invalid cost estimate" in panel.errors
+    assert not judge.called
+
+
+class _NoEstimate:
+    name = "noest"
+    evidence = True
+
+    def __init__(self) -> None:
+        self.usage = JudgeUsage(model="m")
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        self.usage.calls += 1
+        self.usage.cost_usd += 5.0
+        return [0.9 for _ in texts]
+
+
+def test_paid_judge_without_estimate_stops_when_exhausted(salary: Scenario) -> None:
+    judge = _NoEstimate()
+    panel = Panel([judge], budget=Budget(limit_usd=1.0))
+    for _ in range(3):
+        panel.judge_items(salary, ITEMS)
+    assert judge.usage.calls == 1
+    assert len([e for e in panel.errors if "budget exceeded" in e]) == 1
+
+
+def test_reset_keeps_usage_object(salary: Scenario) -> None:
+    judge = _Paid(per_call=0.4, estimate=0.1)
+    usage = judge.usage
+    panel = Panel([judge], budget=Budget(limit_usd=1.0))
+    panel.judge_items(salary, ITEMS)
+    panel.reset()
+    assert judge.usage is usage and usage.calls == 0 and usage.cost_usd == 0.0

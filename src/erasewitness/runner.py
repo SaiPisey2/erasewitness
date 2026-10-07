@@ -6,6 +6,7 @@ import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from erasewitness.judges.panel import Panel
 from erasewitness.scenario import Scenario, with_canary
@@ -72,6 +73,10 @@ class RunOutcome:
     started_at: str = ""
     finished_at: str = ""
     error: str | None = None
+    judge_usage: dict[str, dict[str, Any]] = field(default_factory=dict)
+    budget_usd: float | None = None
+    scenario_ref: str = ""
+    non_evidence_judges: list[str] = field(default_factory=list)
 
 
 def _now() -> str:
@@ -164,7 +169,9 @@ class Runner:
         self._config = config or RunConfig()
         self._on_event = on_event
 
-    def run(self, scenario: Scenario, run_id: str | None = None) -> RunOutcome:
+    def run(
+        self, scenario: Scenario, run_id: str | None = None, scenario_ref: str | None = None
+    ) -> RunOutcome:
         scenario = with_canary(scenario)
         rid = run_id or new_run_id()
         self._panel.reset()
@@ -174,6 +181,7 @@ class Runner:
             target="unknown",
             judges=self._panel.names,
             started_at=_now(),
+            scenario_ref=scenario_ref or scenario.id,
         )
         target: Target | None = None
         control: Target | None = None
@@ -285,6 +293,9 @@ class Runner:
                 if cleanup_error is not None and cleanup_error not in cleanup_findings:
                     cleanup_findings.append(cleanup_error)
             out.findings += cleanup_findings
+            out.judge_usage = self._panel.usage_report()
+            out.non_evidence_judges = self._panel.non_evidence
+            out.budget_usd = self._panel.budget.limit_usd if self._panel.budget else None
             out.findings += [f"judge error: {e}" for e in self._panel.errors]
             if out.result is RunResult.PASS and (
                 self._panel.errors or not erase_ok or cleanup_findings

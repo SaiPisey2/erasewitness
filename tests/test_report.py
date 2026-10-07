@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from erasewitness.judges.budget import Budget
 from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
 from erasewitness.report import SecretLeakError, write_run
@@ -192,3 +193,27 @@ def test_evidence_name_collisions_do_not_overwrite(tmp_path: Path, salary: Scena
     assert len(set(pointers.values())) == 2
     for pointer in pointers.values():
         assert (run_dir / pointer).is_file()
+
+
+def test_report_records_judge_usage_and_cost(tmp_path: Path, salary: Scenario) -> None:
+    data = json.loads((write_run(_leaky(salary), tmp_path, KEY) / "result.json").read_text())
+    assert data["judge_usage"]["overlap"]["model"] == "overlap-heuristic"
+    assert data["cost_usd"] == 0.0
+    assert data["scenario_ref"] == "salary"
+    assert data["non_evidence_judges"] == ["overlap"]
+
+
+def test_report_marks_non_evidence_judges(tmp_path: Path, salary: Scenario) -> None:
+    html = (write_run(_leaky(salary), tmp_path, KEY) / "report.html").read_text()
+    assert "are not evidence" in html
+    assert "Total judge cost" in html
+
+
+def test_reproduce_uses_scenario_ref(tmp_path: Path, salary: Scenario) -> None:
+    runner = Runner(
+        lambda: ReferenceTarget("leaky"), Panel([OverlapJudge()], budget=Budget(limit_usd=0.5))
+    )
+    outcome = runner.run(salary, run_id="run-1", scenario_ref="scenarios/custom.yaml")
+    html = (write_run(outcome, tmp_path, KEY) / "report.html").read_text()
+    assert "--scenario scenarios/custom.yaml" in html
+    assert "--budget 0.5" in html

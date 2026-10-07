@@ -252,3 +252,16 @@ def test_duplicate_recall_queries_deduplicated(salary: Scenario) -> None:
     )
     ids = [s.probe_id for s in probe_specs(dup)]
     assert ids.count("recall:salary") == 1
+
+
+def test_runner_records_budget_and_usage(salary: Scenario) -> None:
+    from erasewitness.judges.budget import Budget
+
+    runner = Runner(
+        lambda: ReferenceTarget("clean"), Panel([OverlapJudge()], budget=Budget(limit_usd=2.0))
+    )
+    outcome = runner.run(salary, run_id="run-1")
+    assert outcome.budget_usd == 2.0
+    assert outcome.scenario_ref == "salary"
+    calls = outcome.judge_usage["overlap"]["calls"]
+    assert isinstance(calls, int) and calls > 0

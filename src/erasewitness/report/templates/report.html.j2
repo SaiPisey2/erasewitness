@@ -31,6 +31,13 @@ pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
 {% for p in r.probes %}<tr><td>{{ p.probe_id }}</td><td>{{ p.layer }}</td><td class="v-{{ p.verdict }}">{{ p.verdict }}</td><td>{{ p.reason }}</td></tr>
 {% endfor %}</table>
 
+<h2>Judges</h2>
+<table>
+<tr><th>Judge</th><th>Model</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Cost (USD)</th></tr>
+{% for name, u in r.judge_usage.items() %}<tr><td>{{ name }}</td><td>{{ u.model }}</td><td>{{ u.calls }}</td><td>{{ u.input_tokens }}</td><td>{{ u.output_tokens }}</td><td>${{ "%.4f"|format(u.cost_usd) }}</td></tr>
+{% endfor %}</table>
+<p>Total judge cost: ${{ "%.4f"|format(r.cost_usd) }}{% if r.budget_usd is not none %} (budget ${{ "%.2f"|format(r.budget_usd) }}){% endif %}</p>
+
 <h2>Leaks</h2>
 {% for c in leaks %}<div>
 <h3>{{ c.probe_id }}: {{ c.source }}</h3>
@@ -49,9 +56,10 @@ pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
 
 <h2>Method</h2>
 <p>A synthetic fact about a made-up person ({{ r.scenario.subject.name }}) was planted with a unique marker{% if not r.redacted %} ({{ r.scenario.fact.canary }}){% endif %}, used in {{ r.scenario.exercise|length }} follow-up conversations, then erased with the {{ r.method }} method. Every probe ran before erasure (a probe that could not see the fact is INVALID), after erasure, and on a fresh space that never saw the fact. A result is LEAKED when the marker or a sensitive value appears, or when every semantic judge ({{ r.judges|join(", ") }}) is confident the text reveals the fact.</p>
-<p>Limits: the signature on this report proves the files were not altered after the run; it does not prove the run itself was honest. AI-based systems are non-deterministic, so a re-run can differ.</p>
+{% if r.non_evidence_judges %}<p>Results from these judges are an offline heuristic and are not evidence: {{ r.non_evidence_judges|join(", ") }}.</p>
+{% endif %}<p>Limits: the signature on this report proves the files were not altered after the run; it does not prove the run itself was honest. AI-based systems are non-deterministic, so a re-run can differ.</p>
 
 <h2>Reproduce</h2>
-<pre>erasewitness run --target {{ r.target }} --scenario {{ r.scenario.id }} --judges {{ r.judges|join(",") }}{% if r.method == "strict" %} --strict{% endif %}{% if r.redacted %} --redact-evidence{% endif %}</pre>
+<pre>erasewitness run --target {{ r.target }} --scenario {{ r.scenario_ref }} --judges {{ r.judges|join(",") }}{% if r.method == "strict" %} --strict{% endif %}{% if r.redacted %} --redact-evidence{% endif %}{% if r.budget_usd is not none %} --budget {{ r.budget_usd }}{% endif %}</pre>
 </body>
 </html>

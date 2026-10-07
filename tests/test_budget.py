@@ -1,7 +1,7 @@
 import pytest
 
 from erasewitness.judges.base import JudgeConfigError
-from erasewitness.judges.budget import Budget
+from erasewitness.judges.budget import Budget, format_usd
 from erasewitness.judges.pricing import cost, estimate_tokens, openai_price
 
 
@@ -28,3 +28,15 @@ def test_pricing() -> None:
     assert estimate_tokens("abcd" * 10) == 11
     with pytest.raises(JudgeConfigError, match="gpt-unknown"):
         openai_price("gpt-unknown")
+
+
+def test_budget_rejects_non_finite_limit() -> None:
+    with pytest.raises(ValueError):
+        Budget(float("inf"))
+    with pytest.raises(ValueError):
+        Budget(float("nan"))
+
+
+def test_sub_cent_budget_displayed() -> None:
+    assert format_usd(0.002) == "0.0020"
+    assert format_usd(1.0) == "1.00"

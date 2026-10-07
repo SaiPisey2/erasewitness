@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
+from erasewitness.judges.base import JudgeUnavailable
 from erasewitness.judges.chunking import chunk_text
 
 
@@ -23,6 +25,7 @@ class SystemOneJudge:
     (the M6 server runs the runner in a worker thread).
     """
 
+    name: str
     chunk_size: int = 8000
     concurrency: int = 8
 
@@ -40,6 +43,14 @@ class SystemOneJudge:
                     return await self._ask_one(session, state, instructions)
 
             flat = await asyncio.gather(*(one(c) for cs in chunks for c in cs))
+        for p in flat:
+            if (
+                not isinstance(p, (int, float))
+                or isinstance(p, bool)
+                or not math.isfinite(p)
+                or not 0.0 <= p <= 1.0
+            ):
+                raise JudgeUnavailable(f"{self.name}: malformed probability")
         out, i = [], 0
         for cs in chunks:
             out.append(max(flat[i : i + len(cs)]))

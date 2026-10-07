@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner, Result
 
-from erasewitness.cli import app
+from erasewitness.cli import JUDGES, app
 from erasewitness.store import RunIndex
 
 cli = CliRunner()
@@ -204,6 +205,7 @@ def test_jev_without_key_exits_3_before_run(
     assert "TYPESAFE_API_KEY" in result.output
     assert "[plant]" not in result.output
     assert not (tmp_path / "runs").exists()
+    assert not (tmp_path / "k.key").exists()
 
 
 def test_openai_without_key_exits_3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,6 +220,52 @@ def test_openai_without_key_exits_3(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_negative_budget_exits_3(tmp_path: Path) -> None:
     result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary", "--budget", "-1")
     assert result.exit_code == 3
+    assert "--budget" in result.output
+
+
+def test_nan_budget_exits_3(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path, "--target", "reference-clean", "--scenario", "salary", "--budget", "nan"
+    )
+    assert result.exit_code == 3
+
+
+def test_inf_budget_exits_3(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path, "--target", "reference-clean", "--scenario", "salary", "--budget", "inf"
+    )
+    assert result.exit_code == 3
+
+
+def test_duplicate_judge_names_deduplicated(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        "--target",
+        "reference-clean",
+        "--scenario",
+        "salary",
+        "--judges",
+        "overlap,overlap",
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads((_only_run_dir(tmp_path) / "result.json").read_text())
+    assert data["judges"] == ["overlap"]
+
+
+class _Raising:
+    name = "overlap"
+    evidence = False
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        raise RuntimeError("bad key sk-" + "A" * 30)
+
+
+def test_run_prints_judge_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(JUDGES, "overlap", _Raising)  # type: ignore[arg-type]
+    result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary")
+    assert result.exit_code == 2, result.output
+    assert "judge error:" in result.output
+    assert "sk-" + "A" * 30 not in result.output
 
 
 def test_run_prints_judge_cost(tmp_path: Path) -> None:

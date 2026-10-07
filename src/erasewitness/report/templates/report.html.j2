@@ -36,7 +36,7 @@ pre{white-space:pre-wrap;background:#f6f6f6;padding:.5rem;border-radius:4px}
 <tr><th>Judge</th><th>Model</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Cost (USD)</th></tr>
 {% for name, u in r.judge_usage.items() %}<tr><td>{{ name }}</td><td>{{ u.model }}</td><td>{{ u.calls }}</td><td>{{ u.input_tokens }}</td><td>{{ u.output_tokens }}</td><td>${{ "%.4f"|format(u.cost_usd) }}</td></tr>
 {% endfor %}</table>
-<p>Total judge cost: ${{ "%.4f"|format(r.cost_usd) }}{% if r.budget_usd is not none %} (budget ${{ "%.2f"|format(r.budget_usd) }}){% endif %}</p>
+<p>Total judge cost: ${{ "%.4f"|format(r.cost_usd) }}{% if r.budget_usd is not none %} (budget ${{ r.budget_usd|usd }}){% endif %}</p>
 
 <h2>Leaks</h2>
 {% for c in leaks %}<div>

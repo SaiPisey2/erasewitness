@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Annotated, NoReturn
 import typer
 
 from erasewitness.judges.base import JudgeConfigError, SemanticJudge
-from erasewitness.judges.budget import Budget
+from erasewitness.judges.budget import Budget, format_usd
 from erasewitness.judges.jev import JevJudge
 from erasewitness.judges.openai_judge import OpenAIJudge
 from erasewitness.judges.overlap import OverlapJudge
@@ -84,11 +85,12 @@ def run(
     if target not in TARGETS:
         _fail(f"unknown target '{target}' (known: {', '.join(sorted(TARGETS))})")
     names = [n.strip() for n in judges.split(",") if n.strip()]
+    names = list(dict.fromkeys(names))
     unknown = [n for n in names if n not in JUDGES]
     if unknown or not names:
         _fail(f"unknown judge '{','.join(unknown)}' (known: {', '.join(sorted(JUDGES))})")
-    if budget < 0:
-        _fail("--budget must be >= 0")
+    if not math.isfinite(budget) or budget < 0:
+        _fail("--budget must be a finite number >= 0")
     try:
         judge_objs = [JUDGES[n]() for n in names]
     except JudgeConfigError as exc:
@@ -126,7 +128,10 @@ def run(
         f"{outcome.result.value}: {leaked} of {len(outcome.probes)} probes leaked after erasure"
     )
     total_cost = sum(u["cost_usd"] for u in outcome.judge_usage.values())
-    typer.echo(f"judge cost: ${total_cost:.4f} of ${budget:.2f} budget")
+    typer.echo(f"judge cost: ${total_cost:.4f} of ${format_usd(budget)} budget")
+    for finding in outcome.findings:
+        if finding.startswith("judge error:"):
+            typer.echo(finding, err=True)
     if outcome.error:
         typer.echo(f"run error: {outcome.error}", err=True)
     typer.echo(f"report: {run_dir / 'report.html'}")

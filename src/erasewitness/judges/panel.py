@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from erasewitness.judges.base import SemanticJudge
-from erasewitness.judges.budget import Budget
+from erasewitness.judges.budget import Budget, format_usd
 from erasewitness.judges.ensemble import Thresholds, decide
 from erasewitness.normalise import first_match
 from erasewitness.scenario import Scenario
@@ -21,6 +21,11 @@ class Panel:
         budget: Budget | None = None,
     ) -> None:
         self._judges = list(judges)
+        seen: set[str] = set()
+        for judge in self._judges:
+            if judge.name in seen:
+                raise ValueError(f"duplicate judge name: {judge.name}")
+            seen.add(judge.name)
         self._thresholds = thresholds or Thresholds()
         self.budget = budget
         self.errors: list[str] = []
@@ -112,9 +117,12 @@ class Panel:
             self._refused.add(id(judge))
             self._record(
                 f"{judge.name}: budget exceeded "
-                f"(spent ${self.budget.spent_usd:.4f} of ${self.budget.limit_usd:.2f})"
+                f"(spent ${self.budget.spent_usd:.4f} of ${format_usd(self.budget.limit_usd)})"
             )
 
     def _record(self, message: str) -> None:
+        from erasewitness.report.secret_scan import redact  # local: report imports runner
+
+        message = redact(message)
         if message not in self.errors:
             self.errors.append(message)

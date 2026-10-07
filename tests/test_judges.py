@@ -258,3 +258,8 @@ def test_reset_keeps_usage_object(salary: Scenario) -> None:
     panel.judge_items(salary, ITEMS)
     panel.reset()
     assert judge.usage is usage and usage.calls == 0 and usage.cost_usd == 0.0
+
+
+def test_panel_rejects_duplicate_names() -> None:
+    with pytest.raises(ValueError, match="duplicate judge name: overlap"):
+        Panel([OverlapJudge(), OverlapJudge()])

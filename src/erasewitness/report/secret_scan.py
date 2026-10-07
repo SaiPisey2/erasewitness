@@ -26,3 +26,9 @@ def scan(files: dict[str, str]) -> None:
             raise SecretLeakError(
                 f"refusing to write report: {name} contains something that looks like an API key"
             )
+
+
+def redact(text: str) -> str:
+    for pattern in _PATTERNS:
+        text = pattern.sub("[redacted]", text)
+    return text

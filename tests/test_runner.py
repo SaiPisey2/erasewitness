@@ -1,9 +1,12 @@
 from collections.abc import Callable
+from pathlib import Path
 
 from erasewitness.judges.overlap import OverlapJudge
 from erasewitness.judges.panel import Panel
+from erasewitness.report import write_run
 from erasewitness.runner import STEPS, Event, RunConfig, Runner, RunOutcome, probe_specs
 from erasewitness.scenario import Scenario
+from erasewitness.signing import generate_key
 from erasewitness.targets.base import Target
 from erasewitness.targets.reference import ReferenceTarget
 from erasewitness.types import EraseResult, Item, RunResult, Verdict
@@ -265,3 +268,20 @@ def test_runner_records_budget_and_usage(salary: Scenario) -> None:
     assert outcome.scenario_ref == "salary"
     calls = outcome.judge_usage["overlap"]["calls"]
     assert isinstance(calls, int) and calls > 0
+
+
+class _KeyLeaker:
+    name = "leaker"
+
+    def judge(self, fact: str, question: str, texts: list[str]) -> list[float]:
+        raise RuntimeError("bad key sk-" + "A" * 30)
+
+
+def test_judge_error_with_key_is_masked_and_run_still_writes(
+    salary: Scenario, tmp_path: Path
+) -> None:
+    outcome = _run(lambda: ReferenceTarget("clean"), salary, Panel([_KeyLeaker()]))
+    run_dir = write_run(outcome, tmp_path, generate_key(tmp_path / "k.key"))
+    text = (run_dir / "result.json").read_text()
+    assert "[redacted]" in text
+    assert "sk-" + "A" * 30 not in text

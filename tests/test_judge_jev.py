@@ -4,7 +4,7 @@ from collections.abc import Callable
 import httpx2
 import pytest
 
-from erasewitness.judges.base import JudgeConfigError
+from erasewitness.judges.base import JudgeConfigError, JudgeUnavailable
 from erasewitness.judges.jev import JevJudge
 
 
@@ -75,3 +75,16 @@ def test_jev_estimate_is_positive_and_small() -> None:
     judge = JevJudge(api_key="test-key-value", transport=_transport(lambda s: 0.5, []))
     est = judge.estimate_cost("fact", "q", ["x" * 4000])
     assert 0 < est < 0.001
+
+
+@pytest.mark.parametrize("bad", [-0.5, float("nan"), 1.5, float("inf")])
+def test_jev_bad_second_chunk_is_unavailable(bad: float) -> None:
+    judge = JevJudge(api_key="test-key-value", transport=_transport(lambda s: 0.1, []))
+    answers = iter([0.1, bad])
+
+    async def fake_ask(session: object, state: str, instructions: str) -> float:
+        return next(answers)
+
+    judge._ask_one = fake_ask  # type: ignore[method-assign]
+    with pytest.raises(JudgeUnavailable, match="malformed probability"):
+        judge.judge("fact", "q", ["a" * 8000 + "b" * 100])

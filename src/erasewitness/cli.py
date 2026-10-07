@@ -80,7 +80,12 @@ def run(
     redact_evidence: Annotated[
         bool, typer.Option(help="Store hashes instead of evidence text.")
     ] = False,
-    budget: Annotated[float, typer.Option(help="Maximum judge spend in USD for this run.")] = 1.0,
+    budget: Annotated[
+        float,
+        typer.Option(
+            help="Maximum JUDGE spend in USD for this run (target-side calls are not capped)."
+        ),
+    ] = 1.0,
 ) -> None:
     """Plant a fact, erase it, probe every layer and write a signed report."""
     loaded = _load(scenario)

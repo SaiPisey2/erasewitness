@@ -12,11 +12,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from erasewitness.judges.pricing import cost, openai_price
 from erasewitness.scenario import Scenario
 from erasewitness.targets.refagent import openai_answer
 from erasewitness.types import Edge, EraseResult, Item, Layer
 
 _DB_TABLES = ("history", "messages")
+_TEXT_COLUMNS = {"old_memory", "new_memory", "content", "memory", "text"}
+_TOP_K = 10
+_THRESHOLD = 0.3
 
 
 class Mem0Target:
@@ -39,7 +43,8 @@ class Mem0Target:
         self.memory: Any = None
 
     def _default_factory(self, directory: Path, collection: str) -> Any:
-        os.environ.setdefault("MEM0_TELEMETRY", "False")
+        os.environ["MEM0_TELEMETRY"] = "False"
+        os.environ.setdefault("MEM0_DIR", str(self.dir / "mem0home"))
         from mem0 import Memory  # type: ignore[import-untyped]
 
         return Memory.from_config(
@@ -102,22 +107,34 @@ class Mem0Target:
         return [Edge(f"memory:{i}", f"history:{i}", "recorded") for i in self.ids]
 
     def erase(self, scenario: Scenario, strict_items: list[Item] | None) -> EraseResult:
-        strict = strict_items is not None
-        queries = [scenario.fact.statement, scenario.fact.canary, *scenario.probes.recall]
-        deleted: set[str] = set()
-        for query in queries:
-            if not query:
-                continue
-            hits = self.memory.search(query, filters={"user_id": self.user_id})["results"]
-            for hit in hits:
-                self.memory.delete(hit["id"])
-                deleted.add(hit["id"])
-        if strict:
-            self.memory.delete_all(user_id=self.user_id)
-        suffix = "; delete_all" if strict else ""
+        # The erase must be blind to the probes: it searches only the fact statement.
+        hits = self.memory.search(
+            scenario.fact.statement,
+            filters={"user_id": self.user_id},
+            top_k=_TOP_K,
+            threshold=_THRESHOLD,
+        )["results"]
+        deleted: dict[str, float | None] = {}
+        for hit in hits:
+            self.memory.delete(hit["id"])
+            deleted[hit["id"]] = hit.get("score")
+        strict_ids = [
+            item.source.removeprefix("memory:")
+            for item in strict_items or []
+            if item.source.startswith("memory:")
+        ]
+        for mem_id in strict_ids:
+            if mem_id not in deleted:
+                self.memory.delete(mem_id)
+                deleted[mem_id] = None
+        scores = " ".join(
+            f"{k[:8]}={'n/a' if v is None else f'{v:.2f}'}" for k, v in deleted.items()
+        )
         return EraseResult(
             True,
-            f"deleted {len(deleted)} memories via delete(id){suffix}; history.db has no delete API",
+            f"app-level search-delete on the fact statement (top_k={_TOP_K}, "
+            f"threshold={_THRESHOLD}): deleted {len(deleted)} memories: {scores}; "
+            "history has no per-fact delete API (only reset())",
         )
 
     def probe_store(self, query: str) -> list[Item]:
@@ -136,17 +153,34 @@ class Mem0Target:
             con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             try:
                 for table in _DB_TABLES:
-                    try:
-                        rows = con.execute(f"select rowid, * from {table}").fetchall()  # noqa: S608
-                    except sqlite3.OperationalError:
+                    columns = [r[1] for r in con.execute(f"pragma table_info({table})")]
+                    wanted = [i for i, c in enumerate(columns) if c in _TEXT_COLUMNS]
+                    if not wanted:
                         continue
-                    for row in rows:
-                        text = " ".join(v for v in row if isinstance(v, str))
+                    for row in con.execute(f"select rowid, * from {table}").fetchall():  # noqa: S608
+                        text = " | ".join(
+                            row[i + 1] for i in wanted if isinstance(row[i + 1], str) and row[i + 1]
+                        )
                         if text:
                             items.append(Item(Layer.DERIVED, f"db:{table}:{row[0]}", text))
             finally:
                 con.close()
         return items
+
+    def notes(self) -> list[str]:
+        usage = getattr(self._answer, "usage", None)
+        calls = getattr(usage, "calls", 0)
+        tokens_in = getattr(usage, "input_tokens", 0)
+        tokens_out = getattr(usage, "output_tokens", 0)
+        in_price, out_price = openai_price("gpt-4o-mini")
+        spend = cost(tokens_in, tokens_out, in_price, out_price)
+        return [
+            f"reference agent (gpt-4o-mini): {calls} calls, {tokens_in} input / "
+            f"{tokens_out} output tokens, about ${spend:.4f} (not counted in the judge budget)",
+            "mem0 internal LLM (gpt-4o-mini) and embedder (text-embedding-3-small) "
+            "calls are not metered",
+            "qdrant on-disk files are not probed",
+        ]
 
     def ask(self, question: str) -> str:
         assert self._answer is not None

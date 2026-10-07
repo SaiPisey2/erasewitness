@@ -284,3 +284,16 @@ def test_mem0_without_openai_key_exits_3(tmp_path: Path, monkeypatch: pytest.Mon
     assert result.exit_code == 3
     assert "OPENAI_API_KEY" in result.output
     assert not (tmp_path / "runs").exists()
+
+
+def test_mem0_missing_package_exits_3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib.util
+
+    real = importlib.util.find_spec
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.setattr(
+        importlib.util, "find_spec", lambda name, *a: None if name == "mem0" else real(name, *a)
+    )
+    result = _run(tmp_path, "--target", "mem0", "--scenario", "salary")
+    assert result.exit_code == 3
+    assert "erasewitness[mem0]" in result.output

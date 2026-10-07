@@ -232,7 +232,9 @@ class Runner:
             out.collateral = self._collateral(out.snapshot, target.snapshot())
             if out.collateral:
                 out.findings.append(
-                    f"collateral deletion: {len(out.collateral)} unrelated item(s) removed"
+                    f"over-deletion: {len(out.collateral)} item(s) not judged to reveal the "
+                    "fact were removed by the erasure (may include content derived from it): "
+                    + "; ".join(out.collateral)
                 )
 
             self._step("control-")
@@ -293,6 +295,12 @@ class Runner:
                 if cleanup_error is not None and cleanup_error not in cleanup_findings:
                     cleanup_findings.append(cleanup_error)
             out.findings += cleanup_findings
+            notes = getattr(target, "notes", None)
+            if callable(notes):
+                try:
+                    out.findings += [f"note: {n}" for n in notes()]
+                except Exception:  # notes are advisory and never affect the run
+                    pass
             out.judge_usage = self._panel.usage_report()
             out.non_evidence_judges = self._panel.non_evidence
             out.budget_usd = self._panel.budget.limit_usd if self._panel.budget else None

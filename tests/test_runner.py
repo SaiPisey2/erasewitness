@@ -63,7 +63,7 @@ def test_overdelete_reports_collateral(salary: Scenario) -> None:
     outcome = _run(lambda: ReferenceTarget("overdelete"), salary)
     assert outcome.result is RunResult.PASS
     assert outcome.collateral == ["history:m1", "memory:m1"]
-    assert any("collateral deletion" in f for f in outcome.findings)
+    assert any("over-deletion" in f for f in outcome.findings)
 
 
 def test_settle_timeout_downgrades_clean(salary: Scenario) -> None:
@@ -285,3 +285,13 @@ def test_judge_error_with_key_is_masked_and_run_still_writes(
     text = (run_dir / "result.json").read_text()
     assert "[redacted]" in text
     assert "sk-" + "A" * 30 not in text
+
+
+def test_runner_notes_do_not_change_result(salary: Scenario) -> None:
+    class Noted(ReferenceTarget):
+        def notes(self) -> list[str]:
+            return ["x"]
+
+    outcome = _run(lambda: Noted("clean"), salary)
+    assert outcome.result is RunResult.PASS
+    assert "note: x" in outcome.findings

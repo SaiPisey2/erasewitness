@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,7 @@ class FakeMemory:
         self.mem: dict[str, str] = {}
         self.hist: dict[str, list[dict[str, Any]]] = {}
         self.n = 0
+        self.queries: list[str] = []
 
     def add(self, messages: list[dict[str, str]], user_id: str) -> dict[str, Any]:
         text = messages[0]["content"]
@@ -27,7 +30,8 @@ class FakeMemory:
         self.hist[mid] = [{"event": "ADD", "old_memory": None, "new_memory": self.mem[mid]}]
         return {"results": [{"id": mid, "memory": self.mem[mid], "event": "ADD"}]}
 
-    def search(self, query: str, filters: dict[str, str]) -> dict[str, Any]:
+    def search(self, query: str, filters: dict[str, str], **kwargs: Any) -> dict[str, Any]:
+        self.queries.append(query)
         words = query.lower().split()
         hits = [
             {"id": k, "memory": v}
@@ -105,4 +109,53 @@ def test_mem0_reads_history_db_rows() -> None:
 
 
 def test_import_without_mem0_installed() -> None:
-    import erasewitness.targets.mem0  # noqa: F401  (must not import mem0 at module level)
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, erasewitness.targets; assert 'mem0' not in sys.modules",
+        ],
+        check=True,
+    )
+
+
+def test_erase_does_not_use_probe_queries(salary: Scenario) -> None:
+    target = _target()
+    target.setup("run-5")
+    target.plant(salary.fact.plant_as)
+    fake: FakeMemory = target.memory
+    fake.queries.clear()
+    target.erase(salary, None)
+    assert fake.queries == [salary.fact.statement]
+    assert not set(fake.queries) & set(salary.probes.recall)
+    target.cleanup()
+
+
+HOLD: list[FakeMemory] = []
+
+
+def _seeded(root: Path, collection: str) -> FakeMemory:
+    fake = FakeMemory(root, collection)
+    fake.mem["hike"] = "User likes hiking"
+    fake.hist["hike"] = [{"event": "ADD", "old_memory": None, "new_memory": "User likes hiking"}]
+    HOLD.append(fake)
+    return fake
+
+
+def test_strict_deletes_only_flagged_memories(salary: Scenario) -> None:
+    outcome = Runner(
+        lambda: Mem0Target(memory_factory=_seeded, answer=_answer),
+        Panel([OverlapJudge()]),
+        RunConfig(strict=True),
+    ).run(salary, run_id="run-6")
+    assert "hike" in HOLD[0].mem
+    assert outcome.collateral == []
+
+
+def test_mem0_notes_disclose_unmetered_spend(salary: Scenario) -> None:
+    outcome = _run_default(salary)
+    assert any(f.startswith("note: mem0 internal LLM") for f in outcome.findings)
+
+
+def _run_default(salary: Scenario) -> Any:
+    return Runner(_target, Panel([OverlapJudge()])).run(salary, run_id="run-7")

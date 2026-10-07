@@ -84,6 +84,7 @@ def outcome_to_dict(outcome: RunOutcome, *, redact: bool = False) -> dict[str, A
         "judge_usage": outcome.judge_usage,
         "cost_usd": round(sum(float(u["cost_usd"]) for u in outcome.judge_usage.values()), 6),
         "budget_usd": outcome.budget_usd,
+        "cost_scope": "judges",
         "scenario_ref": outcome.scenario_ref,
         "non_evidence_judges": outcome.non_evidence_judges,
         "started_at": outcome.started_at,

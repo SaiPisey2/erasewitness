@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import math
+import os
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -95,6 +97,11 @@ def run(
         judge_objs = [JUDGES[n]() for n in names]
     except JudgeConfigError as exc:
         _fail(str(exc))
+    if target == "mem0":
+        if not os.environ.get("OPENAI_API_KEY", "").strip():
+            _fail("the mem0 target needs OPENAI_API_KEY")
+        if importlib.util.find_spec("mem0") is None:
+            _fail("the mem0 target needs: pip install 'erasewitness[mem0]'")
     if "overlap" in names:
         typer.echo(
             "warning: the overlap judge is an offline heuristic; results are not evidence",

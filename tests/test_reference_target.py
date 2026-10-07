@@ -15,7 +15,12 @@ def _prepared(mode: str, salary: Scenario, **kw: bool) -> ReferenceTarget:
 
 
 def test_registry_names() -> None:
-    assert sorted(TARGETS) == ["reference-clean", "reference-leaky", "reference-overdelete"]
+    assert sorted(TARGETS) == [
+        "mem0",
+        "reference-clean",
+        "reference-leaky",
+        "reference-overdelete",
+    ]
     assert create_target("reference-leaky").name == "reference-leaky"
     with pytest.raises(KeyError):
         create_target("nope")

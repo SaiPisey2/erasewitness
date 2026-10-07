@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner, Result
 
 from erasewitness.cli import app
@@ -190,3 +191,40 @@ def test_index_failure_exits_3_after_report(tmp_path: Path) -> None:
     assert "run index update failed" in combined
     run_dir = _only_run_dir(tmp_path)
     assert cli.invoke(app, ["verify", str(run_dir)]).exit_code == 0
+
+
+def test_jev_without_key_exits_3_before_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    result = _run(
+        tmp_path, "--target", "reference-leaky", "--scenario", "salary", "--judges", "jev"
+    )
+    assert result.exit_code == 3
+    assert "TYPESAFE_API_KEY" in result.output
+    assert "[plant]" not in result.output
+    assert not (tmp_path / "runs").exists()
+
+
+def test_openai_without_key_exits_3(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = _run(
+        tmp_path, "--target", "reference-leaky", "--scenario", "salary", "--judges", "openai"
+    )
+    assert result.exit_code == 3
+    assert "OPENAI_API_KEY" in result.output
+
+
+def test_negative_budget_exits_3(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary", "--budget", "-1")
+    assert result.exit_code == 3
+
+
+def test_run_prints_judge_cost(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary")
+    assert "judge cost: $0.0000 of $1.00 budget" in result.output
+
+
+def test_zero_budget_with_overlap_still_passes(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--target", "reference-clean", "--scenario", "salary", "--budget", "0")
+    assert result.exit_code == 0, result.output

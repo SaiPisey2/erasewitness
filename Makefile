@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck fmt verify-attribution check
+.PHONY: test lint typecheck fmt verify-attribution check smoke-live
 
 test:
 	.venv/bin/pytest -q
@@ -18,3 +18,8 @@ verify-attribution:
 	scripts/verify-attribution.sh
 
 check: lint typecheck test verify-attribution
+
+smoke-live:
+	@test -n "$$TYPESAFE_API_KEY" || (echo "export TYPESAFE_API_KEY first"; exit 3)
+	@test -n "$$OPENAI_API_KEY" || (echo "export OPENAI_API_KEY first"; exit 3)
+	.venv/bin/erasewitness run --target reference-leaky --scenario salary --judges jev,openai --budget 0.05 --out /tmp/ew-live/runs --key /tmp/ew-live/k.key
